@@ -4,14 +4,16 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // --- POST /register ---
 
 type RegisterRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required,min=5,max=20"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=8,max=80"`
 }
 
 type RegisterResponse struct {
@@ -22,8 +24,9 @@ type RegisterResponse struct {
 // --- POST /login ---
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	// Username string `json:"username" validate:"required,min=5,max=20"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=8,max=20"`
 }
 
 type LoginResponse struct {
@@ -38,8 +41,8 @@ type HealthResponse struct {
 
 // --- POST /verify-email ---
 type VerifyEmailRequest struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
+	Email string `json:"email" validate:"required,email"`
+	Code  string `json:"code" validate:"required,min=6,max=6"`
 }
 
 type VerifyEmailResponse struct {
@@ -49,7 +52,7 @@ type VerifyEmailResponse struct {
 
 // --- POST /resend-verification ---
 type ResendVerificationRequest struct {
-	Email string `json:"email"`
+	Email string `json:"email" validate:"required,email"`
 }
 
 type ResendVerificationReponse struct {
@@ -62,7 +65,9 @@ type ErrorResponse struct {
 }
 
 // helper handler
-type BaseHandler struct{}
+type BaseHandler struct {
+	validate *validator.Validate
+}
 
 func (b *BaseHandler) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -88,6 +93,10 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
 	}
 	defer r.Body.Close()
+	if err := rh.validate.Struct(req); err != nil {
+		// http.Error(w, "Validation failed", http.StatusBadRequest)
+		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+	}
 
 	log.Println("Registering User: ", req.Username, req.Email)
 
@@ -104,8 +113,11 @@ func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
 	}
 	defer r.Body.Close()
+	if err := rh.validate.Struct(req); err != nil {
+		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+	}
 
-	log.Println("Loging in with User: ", req.Username)
+	log.Println("Loging in with User Email: ", req.Email)
 
 	rh.writeJSON(w, http.StatusOK, LoginResponse{
 		ID:     "dml-uuid-456",
@@ -128,8 +140,12 @@ func (rh *RegisterHandler) HandleResendVerification(w http.ResponseWriter, r *ht
 }
 
 func serverHandling() {
-
-	rh := &RegisterHandler{}
+	validater := validator.New()
+	rh := &RegisterHandler{
+		BaseHandler: BaseHandler{
+			validate: validater,
+		},
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /register", rh.HandleRegister)
