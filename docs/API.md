@@ -49,7 +49,7 @@ Base URL (local): http://localhost:8080
 **Request**:
 ```
 {
-    "email": "duong.loi@hcltech.com",
+    "username": "dml_123",
     "password": "AbC123456",
 }
 ```

@@ -28,12 +28,12 @@ services:
     restart: on-failure
     environment:
       - POSTGRES_DB=${DB_NAME:-gopasswordregis}
-      # - POSTGRES_USER=${DB_USER:-gopasswordregis}
+      - POSTGRES_USER=${DB_USER:-gopasswordregis}
       - POSTGRES_PASSWORD=${DB_PASSWORD:-gopasswordregis_pass}
     ports:
       - "${DB_PORT:-5432}:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 5s
       timeout: 3s
       retries: 5

@@ -24,9 +24,9 @@ type RegisterResponse struct {
 // --- POST /login ---
 
 type LoginRequest struct {
-	// Username string `json:"username" validate:"required,min=5,max=20"`
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=8,max=20"`
+	Username string `json:"username" validate:"required,min=5,max=20"`
+	// Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=8,max=80"`
 }
 
 type LoginResponse struct {
@@ -91,11 +91,13 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
+		return
 	}
 	defer r.Body.Close()
 	if err := rh.validate.Struct(req); err != nil {
 		// http.Error(w, "Validation failed", http.StatusBadRequest)
 		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+		return
 	}
 
 	log.Println("Registering User: ", req.Username, req.Email)
@@ -111,13 +113,15 @@ func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
+		return
 	}
 	defer r.Body.Close()
 	if err := rh.validate.Struct(req); err != nil {
 		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+		return
 	}
 
-	log.Println("Loging in with User Email: ", req.Email)
+	log.Println("Loging in with User Email: ", req.Username)
 
 	rh.writeJSON(w, http.StatusOK, LoginResponse{
 		ID:     "dml-uuid-456",
