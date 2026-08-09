@@ -19,11 +19,11 @@ Users register in 2 steps: submit username and password, then verify their email
 
 ## Components
 
-| Component | Role |
-|-----------|------|
-| **Registration Server** | Accepts registration requests, manages prospect lifecycle (pending → verified → active) |
-| **Credential Service** | Handles password hashing, credential storage and verification |
-| **Temporal Worker** | Orchestrates the registration flow, handles email verification signal, cleans up expired registrations |
+| Component               | Role                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Registration Server** | Accepts registration requests, manages prospect lifecycle (pending → verified → active)                |
+| **Credential Service**  | Handles password hashing, credential storage and verification                                          |
+| **Temporal Worker**     | Orchestrates the registration flow, handles email verification signal, cleans up expired registrations |
 
 ## Data
 

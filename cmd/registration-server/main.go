@@ -6,6 +6,13 @@ import (
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/minhloi0901/go-password-regis/internal/config"
+	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
+	"github.com/minhloi0901/go-password-regis/internal/prospect"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // --- POST /register ---
@@ -84,6 +91,9 @@ func (b *BaseHandler) writeError(w http.ResponseWriter, status int, msg string) 
 
 type RegisterHandler struct {
 	BaseHandler
+
+	ProspectRepo      prospect.Repository
+	CredentialService credentialv1.CredentialServiceClient
 }
 
 // --- Handlers ---
@@ -102,11 +112,30 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 
 	log.Println("Registering User: ", req.Username, req.Email)
 
-	rh.writeJSON(w, http.StatusCreated, RegisterResponse{
-		ID:     "dml-uuid-123",
-		Status: "pending_verification",
-	})
+	ctx := r.Context()
+	prospectId, err := rh.ProspectRepo.Insert(ctx, req.Username, req.Email)
+	if err != nil {
+		rh.writeError(w, http.StatusInternalServerError, "could not register when creating prospect")
+		return
+	}
 
+	credentialRequest := &credentialv1.CreateCredentialRequest{
+		ProspectId: prospectId,
+		Username:   req.Username,
+		Password:   req.Password,
+	}
+	log.Println("Credential Request: ", credentialRequest)
+	_, err = rh.CredentialService.CreateCredential(ctx, credentialRequest)
+	if err != nil {
+		log.Fatalf("create credential error: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not register when creating credentials")
+		return
+	}
+
+	rh.writeJSON(w, http.StatusCreated, RegisterResponse{
+		ID:     prospectId,
+		Status: "pending",
+	})
 }
 
 func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +160,7 @@ func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (rh *RegisterHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	rh.writeJSON(w, http.StatusOK, HealthResponse{
-		Status: "healthy 100%",
+		Status: "healthy",
 	})
 }
 
@@ -143,14 +172,7 @@ func (rh *RegisterHandler) HandleResendVerification(w http.ResponseWriter, r *ht
 
 }
 
-func serverHandling() {
-	validater := validator.New()
-	rh := &RegisterHandler{
-		BaseHandler: BaseHandler{
-			validate: validater,
-		},
-	}
-
+func NewRouter(rh *RegisterHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /register", rh.HandleRegister)
 	mux.HandleFunc("POST /login", rh.HandleLogin)
@@ -158,16 +180,44 @@ func serverHandling() {
 	mux.HandleFunc("POST /verify-email", rh.HandleVerifyEmail)
 	mux.HandleFunc("POST /resend-verification", rh.HandleResendVerification)
 
-	// Start server
-	addr := ":8080"
-	log.Printf("Server starting on %s", addr)
-	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-	log.Fatal(server.ListenAndServe())
+	return mux
 }
 
 func main() {
-	serverHandling()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseDSN()), &gorm.Config{TranslateError: true})
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+
+	credentialConn, err := grpc.NewClient(
+		cfg.CredentialServiceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()), // tls connection
+	)
+
+	if err != nil {
+		log.Fatalf("cannot connect grpc port: %s with error %v", cfg.GRPCAddr, err)
+	}
+	defer credentialConn.Close()
+
+	validate := validator.New()
+
+	rh := &RegisterHandler{
+		BaseHandler: BaseHandler{
+			validate: validate,
+		},
+		ProspectRepo:      prospect.NewPostgresRespository(db),
+		CredentialService: credentialv1.NewCredentialServiceClient(credentialConn),
+	}
+
+	server := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: NewRouter(rh),
+	}
+	log.Println("Registration Server is running on port: ", cfg.HTTPAddr)
+	log.Fatal(server.ListenAndServe())
 }
