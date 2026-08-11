@@ -1,3 +1,5 @@
+.PHONY: up down build logs logs-server logs-credential logs-postgres migrate-up
+
 up:
 	docker compose up -d
 

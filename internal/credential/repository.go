@@ -2,13 +2,15 @@ package credential
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Repository interface {
-	Insert(ctx context.Context, prospectID, username, passwordHash string) (credentialID string, err error)
+	Insert(ctx context.Context, prospectID, username, passwordHash string) (string, error)
+	ExistsByUsername(ctx context.Context, username string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -31,10 +33,26 @@ func (r *PostgresRepository) Insert(ctx context.Context, prospectID, username, p
 	}
 
 	if err := r.DB.WithContext(ctx).Create(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return "", ErrUsernameTaken
+		}
 		return "", err
 	}
 
 	return credentialID, nil
+}
+
+func (r *PostgresRepository) ExistsByUsername(ctx context.Context, username string) (bool, error) {
+	var model credentialModel
+
+	if err := r.DB.WithContext(ctx).Where("username = ?", username).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }
 
 func NewCredentialID() string {

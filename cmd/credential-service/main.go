@@ -26,8 +26,8 @@ func main() {
 	}
 
 	credentialServer := &credential.CredentialServer{
-		Repo:   credential.NewPostgresRespository(db),
-		Hasher: credential.NewBcryptHasher(),
+		CredentialRepo: credential.NewPostgresRespository(db),
+		Hasher:         credential.NewBcryptHasher(),
 	}
 
 	grpcServer := grpc.NewServer()

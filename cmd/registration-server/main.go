@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -10,7 +12,9 @@ import (
 	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
 	"github.com/minhloi0901/go-password-regis/internal/prospect"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -111,8 +115,21 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Println("Registering User: ", req.Username, req.Email)
-
 	ctx := r.Context()
+	if err := rh.validateUniqueProspect(ctx, req.Email, req.Username); err != nil {
+		switch {
+		case errors.Is(err, prospect.ErrEmailTaken):
+			rh.writeError(w, http.StatusConflict, "email already existed")
+		case errors.Is(err, prospect.ErrUsernameTaken):
+			rh.writeError(w, http.StatusConflict, "username already existed")
+		default:
+			rh.writeError(w, http.StatusInternalServerError, "could not check prospect repository")
+		}
+		return
+	}
+
+	// time.Sleep(10 * time.Second)
+
 	prospectId, err := rh.ProspectRepo.Insert(ctx, req.Username, req.Email)
 	if err != nil {
 		rh.writeError(w, http.StatusInternalServerError, "could not register when creating prospect")
@@ -125,10 +142,12 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 		Password:   req.Password,
 	}
 	log.Println("Credential Request: ", credentialRequest)
-	_, err = rh.CredentialService.CreateCredential(ctx, credentialRequest)
-	if err != nil {
-		log.Fatalf("create credential error: %v", err)
-		rh.writeError(w, http.StatusInternalServerError, "could not register when creating credentials")
+	if _, err = rh.CredentialService.CreateCredential(ctx, credentialRequest); err != nil {
+		if st, ok := status.FromError(err); !ok {
+			rh.writeError(w, http.StatusInternalServerError, "could not register when creating credentials")
+		} else {
+			rh.writeError(w, grpcCodeToHttpStatus(st.Code()), st.Message())
+		}
 		return
 	}
 
@@ -138,6 +157,38 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func grpcCodeToHttpStatus(code codes.Code) int {
+	switch code {
+	case codes.AlreadyExists:
+		return http.StatusConflict
+	case codes.NotFound:
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func (rh *RegisterHandler) validateUniqueProspect(ctx context.Context, email, username string) error {
+	exists, err := rh.ProspectRepo.ExistsByEmail(ctx, email)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return prospect.ErrEmailTaken
+	}
+
+	exists, err = rh.ProspectRepo.ExistsByUsername(ctx, username)
+	if err != nil {
+		// rh.writeError(w, http.StatusInternalServerError, "could not check prospect repository")
+		return err
+	}
+	if exists {
+		return prospect.ErrUsernameTaken
+	}
+	return nil
+}
+
+// not implement
 func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -189,31 +240,31 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	// start postgre connection
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseDSN()), &gorm.Config{TranslateError: true})
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
 
+	// start credential grpc connection
 	credentialConn, err := grpc.NewClient(
 		cfg.CredentialServiceAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()), // tls connection
 	)
-
 	if err != nil {
-		log.Fatalf("cannot connect grpc port: %s with error %v", cfg.GRPCAddr, err)
+		log.Fatalf("cannot connect grpc port: %s with error %v", cfg.CredentialServiceAddr, err)
 	}
 	defer credentialConn.Close()
 
-	validate := validator.New()
-
 	rh := &RegisterHandler{
 		BaseHandler: BaseHandler{
-			validate: validate,
+			validate: validator.New(),
 		},
 		ProspectRepo:      prospect.NewPostgresRespository(db),
 		CredentialService: credentialv1.NewCredentialServiceClient(credentialConn),
 	}
 
+	// start registration http
 	server := &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: NewRouter(rh),

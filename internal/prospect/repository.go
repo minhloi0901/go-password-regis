@@ -3,19 +3,15 @@ package prospect
 import (
 	"context"
 	"errors"
-	"log"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-var (
-	ErrEmailTaken    = errors.New("email already used")
-	ErrUsernameTaken = errors.New("username already used")
-)
-
 type Repository interface {
-	Insert(ctx context.Context, username, email string) (prospectID string, err error)
+	Insert(ctx context.Context, username, email string) (string, error)
+	ExistsByEmail(ctx context.Context, email string) (bool, error)
+	ExistsByUsername(ctx context.Context, username string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -38,7 +34,7 @@ func (r *PostgresRepository) Insert(ctx context.Context, username, email string)
 	}
 
 	if err := r.DB.WithContext(ctx).Create(&model).Error; err != nil {
-		log.Printf("insert prospect failed: %v", err)
+		// log.Printf("insert prospect failed: %v", err)
 		return "", err
 	}
 
