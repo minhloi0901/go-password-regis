@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
@@ -13,6 +14,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const credentialCallTimeout = 5 * time.Second
 
 // helper handler
 type BaseHandler struct {
@@ -59,6 +62,7 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 		case errors.Is(err, prospect.ErrUsernameTaken):
 			rh.writeError(w, http.StatusConflict, "username already existed")
 		default:
+			log.Printf("Register - Pre-check Unique: %v", err)
 			rh.writeError(w, http.StatusInternalServerError, "could not check prospect repository")
 		}
 		return
@@ -68,6 +72,11 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 
 	prospectId, err := rh.ProspectRepo.Insert(ctx, req.Username, req.Email)
 	if err != nil {
+		if errors.Is(err, prospect.ErrProspectConflict) {
+			rh.writeError(w, http.StatusConflict, "email or username already exists")
+			return
+		}
+		log.Printf("Register - Insert Prospect: %v", err)
 		rh.writeError(w, http.StatusInternalServerError, "could not register when creating prospect")
 		return
 	}
@@ -79,9 +88,16 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Println("Credential Request: ", credentialRequest.Username)
+
+	ctx, cancel := context.WithTimeout(ctx, credentialCallTimeout)
+	defer cancel()
+
 	if _, err = rh.CredentialService.CreateCredential(ctx, credentialRequest); err != nil {
+		// undo the insert prospect operation if CreateCredential failed
+		rh.deleteProspect(ctx, prospectId)
+
 		if st, ok := status.FromError(err); !ok {
-			rh.writeError(w, http.StatusInternalServerError, "could not register when creating credentials")
+			rh.writeError(w, http.StatusInternalServerError, "could not register when creating credential")
 		} else {
 			rh.writeError(w, grpcCodeToHttpStatus(st.Code()), st.Message())
 		}
@@ -90,8 +106,97 @@ func (rh *RegisterHandler) HandleRegister(w http.ResponseWriter, r *http.Request
 
 	rh.writeJSON(w, http.StatusCreated, RegisterResponse{
 		ID:     prospectId,
-		Status: "pending",
+		Status: prospect.StatusPending,
 	})
+}
+
+func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
+		return
+	}
+	defer r.Body.Close()
+	if err := rh.validate.Struct(req); err != nil {
+		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+		return
+	}
+
+	// Authentication
+	ctx := r.Context()
+
+	ctx, cancel := context.WithTimeout(ctx, credentialCallTimeout)
+	defer cancel()
+
+	credentialRequest := &credentialv1.VerifyCredentialRequest{
+		Username: req.Username,
+		Password: req.Password,
+	}
+
+	log.Println("Verify Credential Request: ", credentialRequest.Username)
+
+	credentialResponse, err := rh.CredentialService.VerifyCredential(ctx, credentialRequest)
+	if err != nil {
+		if st, ok := status.FromError(err); !ok {
+			rh.writeError(w, http.StatusInternalServerError, "could not register when verifying credential")
+		} else {
+			rh.writeError(w, grpcCodeToHttpStatus(st.Code()), st.Message())
+		}
+		return
+	}
+
+	if !credentialResponse.Valid {
+		rh.writeError(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
+	log.Println("Log in with User Email: ", req.Username)
+
+	// Authorization
+	currentProspect, err := rh.ProspectRepo.FindById(ctx, credentialResponse.ProspectId)
+	if err != nil {
+		log.Printf("Login - Find Prospect: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not login")
+		return
+	}
+	if currentProspect.Status != prospect.StatusActive {
+		switch currentProspect.Status {
+		case prospect.StatusPending:
+			rh.writeError(w, http.StatusForbidden, "account not verified")
+		case prospect.StatusSuspended:
+			rh.writeError(w, http.StatusForbidden, "account suspended")
+		default:
+			rh.writeError(w, http.StatusForbidden, "account not active yet")
+		}
+		return
+	}
+
+	log.Println("Login successful for user: ", currentProspect.Username)
+
+	rh.writeJSON(w, http.StatusOK, LoginResponse{
+		ID:     currentProspect.ID,
+		Status: currentProspect.Status,
+	})
+}
+
+func (rh *RegisterHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	rh.writeJSON(w, http.StatusOK, HealthResponse{
+		Status: "healthy",
+	})
+}
+
+func (rh *RegisterHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (rh *RegisterHandler) HandleResendVerification(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (rh *RegisterHandler) deleteProspect(ctx context.Context, id string) error {
+	if err := rh.ProspectRepo.DeleteById(ctx, id); err != nil {
+		return err
+	}
+	return nil
 }
 
 func grpcCodeToHttpStatus(code codes.Code) int {
@@ -100,6 +205,12 @@ func grpcCodeToHttpStatus(code codes.Code) int {
 		return http.StatusConflict
 	case codes.NotFound:
 		return http.StatusNotFound
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	case codes.DeadlineExceeded:
+		return http.StatusGatewayTimeout
+	case codes.Unavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -123,39 +234,4 @@ func (rh *RegisterHandler) validateUniqueProspect(ctx context.Context, email, us
 		return prospect.ErrUsernameTaken
 	}
 	return nil
-}
-
-// not implement
-func (rh *RegisterHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
-		return
-	}
-	defer r.Body.Close()
-	if err := rh.validate.Struct(req); err != nil {
-		rh.writeError(w, http.StatusBadRequest, "Validation failed")
-		return
-	}
-
-	log.Println("Loging in with User Email: ", req.Username)
-
-	rh.writeJSON(w, http.StatusOK, LoginResponse{
-		ID:     "dml-uuid-456",
-		Status: "active",
-	})
-}
-
-func (rh *RegisterHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
-	rh.writeJSON(w, http.StatusOK, HealthResponse{
-		Status: "healthy",
-	})
-}
-
-func (rh *RegisterHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Request) {
-
-}
-
-func (rh *RegisterHandler) HandleResendVerification(w http.ResponseWriter, r *http.Request) {
-
 }

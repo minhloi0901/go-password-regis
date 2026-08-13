@@ -5,5 +5,6 @@ import (
 )
 
 var (
-	ErrUsernameTaken = errors.New("username already used")
+	ErrUsernameTaken      = errors.New("username already used")
+	ErrCredentialNotFound = errors.New("credential not found")
 )

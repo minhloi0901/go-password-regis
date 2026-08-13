@@ -11,6 +11,7 @@ import (
 type Repository interface {
 	Insert(ctx context.Context, prospectID, username, passwordHash string) (string, error)
 	ExistsByUsername(ctx context.Context, username string) (bool, error)
+	FindByUsername(ctx context.Context, username string) (Credential, error)
 }
 
 type PostgresRepository struct {
@@ -53,6 +54,24 @@ func (r *PostgresRepository) ExistsByUsername(ctx context.Context, username stri
 	}
 
 	return true, nil
+}
+
+func (r *PostgresRepository) FindByUsername(ctx context.Context, username string) (Credential, error) {
+	var model credentialModel
+
+	if err := r.DB.WithContext(ctx).Where("username = ?", username).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Credential{}, ErrCredentialNotFound
+		}
+		return Credential{}, err
+	}
+
+	return Credential{
+		ID:           model.ID,
+		ProspectID:   model.ProspectID,
+		Username:     model.Username,
+		PasswordHash: model.PasswordHash,
+	}, nil
 }
 
 func NewCredentialID() string {

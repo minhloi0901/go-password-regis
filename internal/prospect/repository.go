@@ -12,6 +12,8 @@ type Repository interface {
 	Insert(ctx context.Context, username, email string) (string, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	ExistsByUsername(ctx context.Context, username string) (bool, error)
+	DeleteById(ctx context.Context, id string) error
+	FindById(ctx context.Context, id string) (Prospect, error)
 }
 
 type PostgresRepository struct {
@@ -30,11 +32,14 @@ func (r *PostgresRepository) Insert(ctx context.Context, username, email string)
 		ID:       prospectId,
 		Username: username,
 		Email:    email,
-		Status:   "pending",
+		Status:   StatusPending,
 	}
 
 	if err := r.DB.WithContext(ctx).Create(&model).Error; err != nil {
 		// log.Printf("insert prospect failed: %v", err)
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return "", ErrProspectConflict
+		}
 		return "", err
 	}
 
@@ -65,6 +70,32 @@ func (r *PostgresRepository) ExistsByUsername(ctx context.Context, username stri
 	}
 
 	return true, nil
+}
+
+func (r *PostgresRepository) DeleteById(ctx context.Context, id string) error {
+	var model prospectModel
+	if err := r.DB.WithContext(ctx).Where("id = ?", id).Delete(&model).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *PostgresRepository) FindById(ctx context.Context, id string) (Prospect, error) {
+	var model prospectModel
+
+	if err := r.DB.WithContext(ctx).Where("id = ?", id).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Prospect{}, ErrProspectNotFound
+		}
+		return Prospect{}, err
+	}
+
+	return Prospect{
+		ID:       model.ID,
+		Username: model.Username,
+		Email:    model.Email,
+		Status:   model.Status,
+	}, nil
 }
 
 func NewProspectID() string {

@@ -1,6 +1,11 @@
 package credential
 
-import "golang.org/x/crypto/bcrypt"
+import (
+	"errors"
+	"log"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 type Hasher interface {
 	Hash(password string) (string, error)
@@ -23,7 +28,12 @@ func (h *BcryptHasher) Hash(password string) (string, error) {
 
 func (h *BcryptHasher) Compare(hash, password string) (bool, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return false, err
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return false, nil
+		} else {
+			log.Printf("Hash - Compare: %v", err)
+			return false, err
+		}
 	}
 
 	return true, nil
