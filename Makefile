@@ -1,4 +1,4 @@
-.PHONY: up down build logs logs-server logs-credential logs-postgres migrate-up
+.PHONY: up down build logs logs-server logs-credential logs-postgres migrate-up test
 
 up:
 	docker compose up -d
@@ -23,3 +23,6 @@ logs-postgres:
 
 migrate-up:
 	./scripts/migrate.sh
+
+test:
+	go test ./...
