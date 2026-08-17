@@ -17,15 +17,7 @@ type CredentialServer struct {
 	Hasher         Hasher
 }
 
-func testDeleteProspect(username string) bool {
-	return username == "force-fail"
-}
-
 func (s *CredentialServer) CreateCredential(ctx context.Context, req *credentialv1.CreateCredentialRequest) (*credentialv1.CreateCredentialResponse, error) {
-	if testDeleteProspect(req.Username) {
-		return nil, status.Error(codes.Internal, "forced create credential fail")
-	}
-
 	if err := s.validateUniqueCredential(ctx, req.Username); err != nil {
 		if errors.Is(err, ErrUsernameTaken) {
 			return nil, status.Error(codes.AlreadyExists, "username already exists")

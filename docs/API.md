@@ -5,6 +5,17 @@ A basic single HTTP server to handle registration, login, health, verify-email, 
 
 Base URL (local): http://localhost:8080
 
+## Architecture
+
+```
+[Frontend] → HTTP → [Registration Server] → gRPC → [Credential Service]
+                        ↓
+                    [Temporal Worker]
+                    ├── Activity: CreateCredential
+                    ├── Activity: SendVerificationEmail
+                    └── Signal: EmailVerified → ActivateAccount
+```
+
 ## Endpoints
 | Method | Path                 | Description                                                          |
 | ------ | -------------------- | -------------------------------------------------------------------- |
@@ -27,7 +38,7 @@ Base URL (local): http://localhost:8080
 ```
 {
     "id": "dml-uuid-123",
-    "status": "pending_verification",
+    "status": "pending",
 }
 ```
 **Response**: `400 Bad Request` (validation error - missing required field, invalid username, invalid password, weak password...)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/minhloi0901/go-password-regis/internal/config"
+	"github.com/minhloi0901/go-password-regis/internal/email"
 	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
 	"github.com/minhloi0901/go-password-regis/internal/prospect"
 	"github.com/minhloi0901/go-password-regis/internal/registration"
@@ -36,9 +37,20 @@ func main() {
 	}
 	defer credentialConn.Close()
 
+	// start email service connection
+	emailService := email.NewGomailEmailService(
+		cfg.SMTPHost,
+		cfg.SMTPPort,
+		cfg.SMTPUsername,
+		cfg.SMTPPassword,
+		cfg.SMTPFrom,
+		prospect.VerificationCodeTTL,
+	)
+
 	rh := registration.NewRegisterHandler(
 		prospect.NewPostgresRespository(db),
 		credentialv1.NewCredentialServiceClient(credentialConn),
+		emailService,
 	)
 
 	// start registration http

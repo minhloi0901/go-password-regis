@@ -3,17 +3,20 @@ package prospect
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Repository interface {
-	Insert(ctx context.Context, username, email string) (string, error)
+	Insert(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	ExistsByUsername(ctx context.Context, username string) (bool, error)
 	DeleteById(ctx context.Context, id string) error
 	FindById(ctx context.Context, id string) (Prospect, error)
+	FindByEmail(ctx context.Context, email string) (Prospect, error)
+	Active(ctx context.Context, id string) error
 }
 
 type PostgresRepository struct {
@@ -25,14 +28,17 @@ func NewPostgresRespository(db *gorm.DB) *PostgresRepository {
 	return &PostgresRepository{DB: db}
 }
 
-func (r *PostgresRepository) Insert(ctx context.Context, username, email string) (string, error) {
+func (r *PostgresRepository) Insert(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error) {
 	prospectId := NewProspectID()
 
 	model := prospectModel{
-		ID:       prospectId,
-		Username: username,
-		Email:    email,
-		Status:   StatusPending,
+		ID:               prospectId,
+		Username:         username,
+		Email:            email,
+		Status:           StatusPending,
+		VerificationCode: verificationCode,
+		CodeExpiresAt:    codeExpiresAt,
+		ExpiresAt:        expiresAt,
 	}
 
 	if err := r.DB.WithContext(ctx).Create(&model).Error; err != nil {
@@ -91,11 +97,54 @@ func (r *PostgresRepository) FindById(ctx context.Context, id string) (Prospect,
 	}
 
 	return Prospect{
-		ID:       model.ID,
-		Username: model.Username,
-		Email:    model.Email,
-		Status:   model.Status,
+		ID:               model.ID,
+		Username:         model.Username,
+		Email:            model.Email,
+		Status:           model.Status,
+		CreatedAt:        model.CreatedAt,
+		ExpiresAt:        model.ExpiresAt,
+		VerificationCode: model.VerificationCode,
+		CodeExpiresAt:    model.CodeExpiresAt,
 	}, nil
+}
+
+func (r *PostgresRepository) FindByEmail(ctx context.Context, email string) (Prospect, error) {
+	var model prospectModel
+
+	if err := r.DB.WithContext(ctx).Where("email = ?", email).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Prospect{}, ErrProspectNotFound
+		}
+		return Prospect{}, err
+	}
+
+	return Prospect{
+		ID:               model.ID,
+		Username:         model.Username,
+		Email:            model.Email,
+		Status:           model.Status,
+		CreatedAt:        model.CreatedAt,
+		ExpiresAt:        model.ExpiresAt,
+		VerificationCode: model.VerificationCode,
+		CodeExpiresAt:    model.CodeExpiresAt,
+	}, nil
+}
+
+func (r *PostgresRepository) Active(ctx context.Context, id string) error {
+	var model prospectModel
+
+	if err := r.DB.WithContext(ctx).Where("id = ?", id).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrProspectNotFound
+		}
+		return err
+	}
+
+	return r.DB.WithContext(ctx).Model(&model).Updates(map[string]any{
+		"status":            StatusActive,
+		"verification_code": nil,
+		"code_expires_at":   nil,
+	}).Error
 }
 
 func NewProspectID() string {

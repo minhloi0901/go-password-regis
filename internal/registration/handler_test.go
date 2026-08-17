@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
 	"github.com/minhloi0901/go-password-regis/internal/prospect"
@@ -45,15 +46,17 @@ var (
 )
 
 type MockProspectRepository struct {
-	InsertFunc           func(ctx context.Context, username, email string) (string, error)
+	InsertFunc           func(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
 	ExistsByEmailFunc    func(ctx context.Context, email string) (bool, error)
 	ExistsByUsernameFunc func(ctx context.Context, username string) (bool, error)
 	DeleteByIdFunc       func(ctx context.Context, id string) error
 	FindByIdFunc         func(ctx context.Context, id string) (prospect.Prospect, error)
+	FindByEmailFunc      func(ctx context.Context, email string) (prospect.Prospect, error)
+	ActiveFunc           func(ctx context.Context, id string) error
 }
 
-func (m *MockProspectRepository) Insert(ctx context.Context, username, email string) (string, error) {
-	return m.InsertFunc(ctx, username, email)
+func (m *MockProspectRepository) Insert(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error) {
+	return m.InsertFunc(ctx, username, email, verificationCode, codeExpiresAt, expiresAt)
 }
 
 func (m *MockProspectRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
@@ -72,6 +75,14 @@ func (m *MockProspectRepository) FindById(ctx context.Context, id string) (prosp
 	return m.FindByIdFunc(ctx, id)
 }
 
+func (m *MockProspectRepository) FindByEmail(ctx context.Context, email string) (prospect.Prospect, error) {
+	return m.FindByEmailFunc(ctx, email)
+}
+
+func (m *MockProspectRepository) Active(ctx context.Context, id string) error {
+	return m.ActiveFunc(ctx, id)
+}
+
 type MockCredentialServiceClient struct {
 	CreateCredentialFunc func(ctx context.Context, in *credentialv1.CreateCredentialRequest, opts ...grpc.CallOption) (*credentialv1.CreateCredentialResponse, error)
 	VerifyCredentialFunc func(ctx context.Context, in *credentialv1.VerifyCredentialRequest, opts ...grpc.CallOption) (*credentialv1.VerifyCredentialResponse, error)
@@ -85,10 +96,18 @@ func (m *MockCredentialServiceClient) VerifyCredential(ctx context.Context, in *
 	return m.VerifyCredentialFunc(ctx, in)
 }
 
+type MockEmailService struct {
+	SendVerificationEmailFunc func(ctx context.Context, email, code string) error
+}
+
+func (m *MockEmailService) SendVerificationEmail(ctx context.Context, email, code string) error {
+	return m.SendVerificationEmailFunc(ctx, email, code)
+}
+
 // Fill default as helper
 func fillProspectDefaults(m *MockProspectRepository) {
 	if m.InsertFunc == nil {
-		m.InsertFunc = func(ctx context.Context, username string, email string) (string, error) {
+		m.InsertFunc = func(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error) {
 			return testProspectId, nil
 		}
 	}
@@ -110,6 +129,16 @@ func fillProspectDefaults(m *MockProspectRepository) {
 	if m.FindByIdFunc == nil {
 		m.FindByIdFunc = func(ctx context.Context, id string) (prospect.Prospect, error) {
 			return testProspect, nil
+		}
+	}
+	if m.FindByEmailFunc == nil {
+		m.FindByEmailFunc = func(ctx context.Context, email string) (prospect.Prospect, error) {
+			return testProspect, nil
+		}
+	}
+	if m.ActiveFunc == nil {
+		m.ActiveFunc = func(ctx context.Context, id string) error {
+			return nil
 		}
 	}
 }
@@ -135,7 +164,7 @@ func TestHandleRegister(t *testing.T) {
 
 		mockExistsByEmail    func(ctx context.Context, email string) (bool, error)
 		mockExistsByUsername func(ctx context.Context, username string) (bool, error)
-		mockInsert           func(ctx context.Context, username, email string) (string, error)
+		mockInsert           func(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
 		mockDeleteById       func(ctx context.Context, id string) error
 		mockCreateCredential func(ctx context.Context, in *credentialv1.CreateCredentialRequest, opts ...grpc.CallOption) (*credentialv1.CreateCredentialResponse, error)
 
@@ -227,10 +256,13 @@ func TestHandleRegister(t *testing.T) {
 
 			fillCredentialDefaults(mockCredentail)
 
+			mockEmail := &MockEmailService{}
+
 			// inject mock to service
 			rh := NewRegisterHandler(
 				mockRepo,
 				mockCredentail,
+				mockEmail,
 			)
 
 			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
@@ -311,10 +343,13 @@ func TestHandleLogin(t *testing.T) {
 
 			fillCredentialDefaults(mockCredentail)
 
+			mockEmail := &MockEmailService{}
+
 			// inject mock to service
 			rh := NewRegisterHandler(
 				mockRepo,
 				mockCredentail,
+				mockEmail,
 			)
 
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
