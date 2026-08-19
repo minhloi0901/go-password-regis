@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	emailmocks "github.com/minhloi0901/go-password-regis/internal/email/mocks"
 	credentialv1 "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1"
+	credentialmocks "github.com/minhloi0901/go-password-regis/internal/genproto/credential/v1/mocks"
 	"github.com/minhloi0901/go-password-regis/internal/prospect"
+	prospectmocks "github.com/minhloi0901/go-password-regis/internal/prospect/mocks"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,15 +32,27 @@ const (
 		"username": "rudeus",
 		"password": "qweasdZXC@123"
 	}`
-	testCredentialId = "credential-id-1"
+	testCredentialId    = "credential-id-1"
+	testVerifyEmailBody = `{
+		"email": "loine@example.com",
+		"code": "123456"
+	}`
 )
 
 var (
-	testProspect = prospect.Prospect{
+	testActiveProspect = prospect.Prospect{
 		ID:       testProspectId,
 		Username: "rudeus",
 		Email:    "loi@example.com",
 		Status:   prospect.StatusActive,
+	}
+	testPendingProspect = prospect.Prospect{
+		ID:               "prospect-id-2",
+		Username:         "rudy2",
+		Email:            "loine@example.com",
+		Status:           prospect.StatusPending,
+		VerificationCode: "123456",
+		CodeExpiresAt:    time.Now().Add(5 * time.Minute),
 	}
 	testCreateCredentialResponse = &credentialv1.CreateCredentialResponse{CredentialId: testCredentialId}
 	testVerifyCredentialResponse = &credentialv1.VerifyCredentialResponse{
@@ -128,12 +144,12 @@ func fillProspectDefaults(m *MockProspectRepository) {
 	}
 	if m.FindByIdFunc == nil {
 		m.FindByIdFunc = func(ctx context.Context, id string) (prospect.Prospect, error) {
-			return testProspect, nil
+			return testActiveProspect, nil
 		}
 	}
 	if m.FindByEmailFunc == nil {
 		m.FindByEmailFunc = func(ctx context.Context, email string) (prospect.Prospect, error) {
-			return testProspect, nil
+			return testActiveProspect, nil
 		}
 	}
 	if m.ActiveFunc == nil {
@@ -152,6 +168,14 @@ func fillCredentialDefaults(m *MockCredentialServiceClient) {
 	if m.VerifyCredentialFunc == nil {
 		m.VerifyCredentialFunc = func(ctx context.Context, in *credentialv1.VerifyCredentialRequest, opts ...grpc.CallOption) (*credentialv1.VerifyCredentialResponse, error) {
 			return testVerifyCredentialResponse, nil
+		}
+	}
+}
+
+func fillEmailDefaults(m *MockEmailService) {
+	if m.SendVerificationEmailFunc == nil {
+		m.SendVerificationEmailFunc = func(ctx context.Context, email, code string) error {
+			return nil
 		}
 	}
 }
@@ -256,7 +280,10 @@ func TestHandleRegister(t *testing.T) {
 
 			fillCredentialDefaults(mockCredentail)
 
+			// init email service mock
 			mockEmail := &MockEmailService{}
+
+			fillEmailDefaults(mockEmail)
 
 			// inject mock to service
 			rh := NewRegisterHandler(
@@ -343,7 +370,10 @@ func TestHandleLogin(t *testing.T) {
 
 			fillCredentialDefaults(mockCredentail)
 
+			// init email service mock
 			mockEmail := &MockEmailService{}
+
+			fillEmailDefaults(mockEmail)
 
 			// inject mock to service
 			rh := NewRegisterHandler(
@@ -370,5 +400,37 @@ func TestHandleLogin(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandleVerifyEmail(t *testing.T) {
+	ctrl := gomock.NewController(t)
+
+	mockRepo := prospectmocks.NewMockRepository(ctrl)
+	mockCredential := credentialmocks.NewMockCredentialServiceClient(ctrl)
+	mockEmail := emailmocks.NewMockEmailService(ctrl)
+
+	rh := NewRegisterHandler(
+		mockRepo,
+		mockCredential,
+		mockEmail,
+	)
+
+	// test repo func for email verification
+	mockRepo.EXPECT().
+		FindByEmail(gomock.Any(), "loine@example.com").
+		Return(testPendingProspect, nil)
+
+	mockRepo.EXPECT().
+		Active(gomock.Any(), "prospect-id-2").
+		Return(nil)
+
+	// test verify email flow
+	req := httptest.NewRequest(http.MethodPost, "/verify-email", strings.NewReader(testVerifyEmailBody))
+	rec := httptest.NewRecorder()
+	rh.HandleVerifyEmail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("http status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }

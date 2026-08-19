@@ -214,6 +214,7 @@ func (rh *RegisterHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Requ
 	}
 
 	ctx := r.Context()
+
 	// find prospect
 	tempProspect, err := rh.ProspectRepo.FindByEmail(ctx, req.Email)
 	if err != nil {

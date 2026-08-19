@@ -128,7 +128,20 @@ Base URL (local): http://localhost:8080
 ```
 {
     "error": "bad_request",
-    "message": "please fill in both emai and password",
+    "message": "invalid or expired verification code",
 }
 ```
+
 ### `POST /resend-verification`
+**Request**:
+```
+{
+    "email": "duong.loi@hcltech.com"
+}
+```
+**Response**: `200 OK`
+```
+{
+    "id": "dml_123"
+    "status": "active"
+}

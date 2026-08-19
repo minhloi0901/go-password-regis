@@ -44,7 +44,6 @@ func main() {
 		cfg.SMTPUsername,
 		cfg.SMTPPassword,
 		cfg.SMTPFrom,
-		prospect.VerificationCodeTTL,
 	)
 
 	rh := registration.NewRegisterHandler(

@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/uuid v1.6.0
+	go.uber.org/mock v0.6.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gorm.io/driver/postgres v1.6.2

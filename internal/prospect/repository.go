@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
+//go:generate mockgen -source=internal/prospect/repository.go -destination=internal/prospect/mocks/mock_repository.go -package=mocks
+
 type Repository interface {
 	Insert(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
