@@ -62,13 +62,14 @@ var (
 )
 
 type MockProspectRepository struct {
-	InsertFunc           func(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
-	ExistsByEmailFunc    func(ctx context.Context, email string) (bool, error)
-	ExistsByUsernameFunc func(ctx context.Context, username string) (bool, error)
-	DeleteByIdFunc       func(ctx context.Context, id string) error
-	FindByIdFunc         func(ctx context.Context, id string) (prospect.Prospect, error)
-	FindByEmailFunc      func(ctx context.Context, email string) (prospect.Prospect, error)
-	ActiveFunc           func(ctx context.Context, id string) error
+	InsertFunc                 func(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error)
+	ExistsByEmailFunc          func(ctx context.Context, email string) (bool, error)
+	ExistsByUsernameFunc       func(ctx context.Context, username string) (bool, error)
+	DeleteByIdFunc             func(ctx context.Context, id string) error
+	FindByIdFunc               func(ctx context.Context, id string) (prospect.Prospect, error)
+	FindByEmailFunc            func(ctx context.Context, email string) (prospect.Prospect, error)
+	ActiveFunc                 func(ctx context.Context, id string) error
+	UpdateVerificationCodeFunc func(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error
 }
 
 func (m *MockProspectRepository) Insert(ctx context.Context, username, email, verificationCode string, codeExpiresAt, expiresAt time.Time) (string, error) {
@@ -97,6 +98,10 @@ func (m *MockProspectRepository) FindByEmail(ctx context.Context, email string) 
 
 func (m *MockProspectRepository) Active(ctx context.Context, id string) error {
 	return m.ActiveFunc(ctx, id)
+}
+
+func (m *MockProspectRepository) UpdateVerificationCode(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error {
+	return m.UpdateVerificationCodeFunc(ctx, id, verificationCode, codeExpiresAt)
 }
 
 type MockCredentialServiceClient struct {
@@ -154,6 +159,11 @@ func fillProspectDefaults(m *MockProspectRepository) {
 	}
 	if m.ActiveFunc == nil {
 		m.ActiveFunc = func(ctx context.Context, id string) error {
+			return nil
+		}
+	}
+	if m.UpdateVerificationCodeFunc == nil {
+		m.UpdateVerificationCodeFunc = func(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error {
 			return nil
 		}
 	}

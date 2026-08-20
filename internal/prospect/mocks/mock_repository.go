@@ -144,3 +144,17 @@ func (mr *MockRepositoryMockRecorder) Insert(ctx, username, email, verificationC
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Insert", reflect.TypeOf((*MockRepository)(nil).Insert), ctx, username, email, verificationCode, codeExpiresAt, expiresAt)
 }
+
+// UpdateVerificationCode mocks base method.
+func (m *MockRepository) UpdateVerificationCode(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateVerificationCode", ctx, id, verificationCode, codeExpiresAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateVerificationCode indicates an expected call of UpdateVerificationCode.
+func (mr *MockRepositoryMockRecorder) UpdateVerificationCode(ctx, id, verificationCode, codeExpiresAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateVerificationCode", reflect.TypeOf((*MockRepository)(nil).UpdateVerificationCode), ctx, id, verificationCode, codeExpiresAt)
+}

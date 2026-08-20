@@ -19,6 +19,7 @@ type Repository interface {
 	FindById(ctx context.Context, id string) (Prospect, error)
 	FindByEmail(ctx context.Context, email string) (Prospect, error)
 	Active(ctx context.Context, id string) error
+	UpdateVerificationCode(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error
 }
 
 type PostgresRepository struct {
@@ -146,6 +147,22 @@ func (r *PostgresRepository) Active(ctx context.Context, id string) error {
 		"status":            StatusActive,
 		"verification_code": nil,
 		"code_expires_at":   nil,
+	}).Error
+}
+
+func (r *PostgresRepository) UpdateVerificationCode(ctx context.Context, id, verificationCode string, codeExpiresAt time.Time) error {
+	var model prospectModel
+
+	if err := r.DB.WithContext(ctx).Where("id = ?", id).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrProspectNotFound
+		}
+		return err
+	}
+
+	return r.DB.WithContext(ctx).Model(&model).Updates(map[string]any{
+		"verification_code": verificationCode,
+		"code_expires_at":   codeExpiresAt,
 	}).Error
 }
 

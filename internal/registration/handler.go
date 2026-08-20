@@ -257,9 +257,63 @@ func (rh *RegisterHandler) HandleVerifyEmail(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// not implement
 func (rh *RegisterHandler) HandleResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req ResendVerificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		rh.writeError(w, http.StatusBadRequest, "Unable to decode Json")
+		return
+	}
+	defer r.Body.Close()
+	if err := rh.validate.Struct(req); err != nil {
+		rh.writeError(w, http.StatusBadRequest, "Validation failed")
+		return
+	}
 
+	ctx := r.Context()
+
+	// find prospect
+	tempProspect, err := rh.ProspectRepo.FindByEmail(ctx, req.Email)
+	if err != nil {
+		log.Printf("ResendVerification - Find Prospect: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not verify")
+		return
+	}
+
+	// check status of prospect
+	if tempProspect.Status == prospect.StatusActive {
+		rh.writeError(w, http.StatusConflict, "email alrealdy verified")
+		return
+	}
+	if tempProspect.Status != prospect.StatusPending {
+		rh.writeError(w, http.StatusForbidden, "account cannot be verified")
+		return
+	}
+
+	// regenerate verification code
+	verificationCode, err := prospect.GenerateVerificationCode()
+	if err != nil {
+		log.Printf("ResendVerification - Generate Verification Code: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not register when generating verification code")
+		return
+	}
+
+	codeExpiresAt := time.Now().Add(prospect.VerificationCodeTTL)
+	if err := rh.ProspectRepo.UpdateVerificationCode(ctx, tempProspect.ID, verificationCode, codeExpiresAt); err != nil {
+		log.Printf("ResendVerification - Update Prospect: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not resending verification")
+		return
+	}
+
+	// resend email
+	if err := rh.EmailService.SendVerificationEmail(ctx, req.Email, verificationCode); err != nil {
+		log.Printf("ResendVerification - Send Verification Code to Email: %v", err)
+		rh.writeError(w, http.StatusInternalServerError, "could not resending verification")
+		return
+	}
+
+	rh.writeJSON(w, http.StatusOK, ResendVerificationReponse{
+		Message: "Resend verificatioin successfully",
+	})
 }
 
 func (rh *RegisterHandler) deleteProspect(ctx context.Context, id string) error {
